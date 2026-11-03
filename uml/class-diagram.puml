@@ -117,7 +117,7 @@ enum "PutDataTag" as PutDataTag <<green>> {
     +STORED_VALUE_LINK
 }
 package "card" as card {
-    interface "«<back:yellow>CardSelectionExtension</back>»\nCalypsoCardSelectionExtension" as CalypsoCardSelectionExtension <<blue>> {
+    interface "«<back:yellow>IsoCardSelectionExtension</back>»\nCalypsoCardSelectionExtension" as CalypsoCardSelectionExtension <<blue>> {
         +acceptInvalidatedCard() → Self
 
         +<color:blue>prepareSelectFileByLid(lid: Short) → Self

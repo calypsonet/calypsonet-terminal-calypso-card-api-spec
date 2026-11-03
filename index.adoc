@@ -1859,10 +1859,14 @@ transaction managers. The supplied factory provides the cryptographic module tha
 | Name       | `CalypsoCardSelectionExtension`
 | Kind       | Interface
 | Namespace  | `calypso.card.card`
-| Extends    | `CardSelectionExtension` (<<ref_cna_tr,CNA-TR-API>>)
+| Extends    | `IsoCardSelectionExtension` (<<ref_cna_tr,CNA-TR-API>>)
 | Since      | 2.0
 | Purpose    | Enriches the <<ref_cna_tr,CNA-TR-API>> selection scenario with Calypso-specific commands and pre-opening of a secure session. An instance is obtained via <<op_CalypsoCardApiFactory_createCalypsoCardSelectionExtension,`CalypsoCardApiFactory.createCalypsoCardSelectionExtension`>>.
 |===
+
+Being an `IsoCardSelectionExtension`, it is paired with an `IsoCardSelector` by the
+`prepareIsoSelectionCase` operation of the selection managers of the <<ref_cna_tr,CNA-TR-API>>: a Calypso
+card is selected by the name of its dedicated file.
 
 By default the selection rejects PRIME revision 3 cards that have been *invalidated*.
 The application MUST call
