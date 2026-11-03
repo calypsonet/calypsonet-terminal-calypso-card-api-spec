@@ -192,6 +192,7 @@ The following topics are *out of scope*:
 * the cryptographic algorithms themselves -- only the SPI contract is normative;
 * the on-the-wire transport between the terminal and any remote ticketing system.
 
+[[sec_conformance]]
 === Conformance
 
 A software product conforms to this specification if and only if:
@@ -338,6 +339,9 @@ is backward-compatible per that API's evolution policy.
 
 | [[ref_iso7816]] [ISO/IEC 7816]
 | https://www.iso.org[_Identification cards -- Integrated circuit cards_].
+
+| [[ref_cl_requirements]] [CNA-CL-REQ]
+| _Calypso Specification -- Calypso Layer Requirements_ (200423-SP-CalypsoLayer-Requirements), version 2.0, 5 May 2023, {organization}. Restricted distribution.
 |===
 
 ==== External Resources
@@ -4163,3 +4167,36 @@ The inconsistency falls into one of the following cases:
 | Since      | 1.0
 | Purpose    | Indicates that the card requires an unauthorised session key.
 |===
+
+// =============================================================================
+[appendix]
+[[annex_external_requirements]]
+== Conformance to external requirements
+
+[NOTE]
+This annex is _informative_. <<sec_conformance,Conformance>> defines what conforming *to this specification* means;
+this annex states, requirement by requirement, how this specification stands with respect to an *external*
+requirements profile, and records the reasons when a requirement is met through another mechanism, is deliberately
+not exposed, or is left to the implementation layer.
+
+Each requirement reviewed is given one of the following statuses:
+
+[cols="^.^1,.^3", options="header"]
+|===
+| Status | Meaning
+
+| Satisfied as stated
+| The specification provides what the requirement asks for, in the form the requirement describes.
+
+| Satisfied by an equivalent mechanism
+| The intent of the requirement is met, through a mechanism that differs from the one it describes.
+
+| Deliberately not exposed
+| The capability is not offered to the upper layer, as a design decision stated in the corresponding note.
+
+| Delegated to the implementation layer
+| The capability belongs to the implementation or to its configuration, outside the surface of this API.
+|===
+
+Entries are added below, one per applicability group of the <<ref_cl_requirements,Calypso Layer requirements>>, as
+each group is reviewed. No group has been reviewed in this edition.
