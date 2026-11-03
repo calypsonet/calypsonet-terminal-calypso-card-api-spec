@@ -4202,5 +4202,15 @@ Each requirement reviewed is given one of the following statuses:
 | The capability belongs to the implementation or to its configuration, outside the surface of this API.
 |===
 
-Entries are added below, one per applicability group of the <<ref_cl_requirements,Calypso Layer requirements>>, as
-each group is reviewed. No group has been reviewed in this edition.
+[[annex_applicability_contexts]]
+=== Applicability contexts
+
+A requirement of the <<ref_cl_requirements,Calypso Layer requirements>> may carry one or more *applicability
+contexts*. A context does not qualify the requirement but the layer itself: it states the kind of layer the
+requirement applies to, and a requirement that carries several contexts applies only to a layer satisfying all of
+them. This subsection states, for each context met by the requirements reviewed, under which conditions this
+specification constitutes such a layer. The entries that follow then give, requirement by requirement, the
+contexts it carries and the way this specification answers it.
+
+No requirement group has been reviewed in this edition, so no context is listed yet.
+
