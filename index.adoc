@@ -217,6 +217,10 @@ Type names follow `UpperCamelCase`; operation, parameter and enumeration-member 
 except for enumeration values which use `UPPER_SNAKE_CASE`. Names defined by this specification are reproduced
 as-is in the UML class diagram (<<sec_class_diagram>>).
 
+A name that carries a time quantity states its encoding: a *duration* ends with the suffix of its unit
+(`...Ms` for milliseconds), and an *instant* ends with `...LocalEpochSeconds`, meaning the number of seconds
+elapsed since 1 January 1970 at 0:00 in the *local time* of the network, as defined in the glossary.
+
 ==== Data types
 
 The following type names, whose notation is inspired by the Kotlin language, are used in operation signatures
@@ -374,6 +378,8 @@ is backward-compatible per that API's evolution policy.
 | Crypto Module     | Component implementing the SPI exposed by <<ref_cna_tccs,CNA-TCCS-API>> or <<ref_cna_tcca,CNA-TCCA-API>>.
 | KIF / KVC         | Calypso Key Identifier / Key Version Code.
 | HCE               | Host Card Emulation.
+| SN Header         | Two most significant bytes of the application serial number of a Calypso HCE application, carrying the end of validity of its debit key.
+| Local Time        | Time reference of the ticketing network, in which the SN Header expresses the end of validity of a debit key and in which the terminal evaluates it. It is the reference in which the tokens were provisioned, and not, in itself, the time zone configured on the terminal.
 |===
 
 === Acronyms
@@ -433,6 +439,9 @@ include::uml/architecture-overview.puml[]
 
 | `calypso.card.transaction.spi`           | SPI
 | Marker interfaces implemented by crypto extensions (`SymmetricCryptoCardTransactionManagerFactory`, `AsymmetricCryptoCardTransactionManagerFactory`, certificate markers, `CardTransactionCryptoExtension`).
+
+| `calypso.card.spi`                       | SPI
+| Services provided by the application to the card extension (`HceTimeProvider`).
 |===
 
 [[sec_maxduration]]
@@ -527,6 +536,60 @@ selection.
 A `...ByCsn(...)` call with an already declared `csnMin` replaces the previous value. A `...ByFci(...)` call with an
 already declared `fciRegex` (identical character string) replaces the previous value and keeps its position in the
 evaluation order.
+
+[[sec_hce_validity]]
+=== HCE debit key validity
+
+The application serial number of a *Calypso HCE* application is made of two fields: the two most significant bytes,
+the *SN Header*, carry the date and time of end of validity of the debit key, coded as the number of half-days
+elapsed since 1 January 2010 at 0:00 **local time**; the six remaining bytes are the SN Value, which identifies the
+application. The header is not significant when it is equal to `0`. An HCE application is recognised by the two
+most significant bits of the fourth byte of its serial number.
+
+The reference being local, the terminal and the issuer of the token MUST share the same local time reference. The
+resolution of the encoding is half a day, so a difference of time zone between them shifts the boundary of the
+validity window by the corresponding offset.
+
+Nothing in the card dialogue reveals an outdated header: the header takes part in the diversification of the debit
+key, so a card whose validity window has passed still authenticates normally. The verification therefore belongs to
+the terminal, and this specification splits it in three.
+
+*Decoding.* <<op_CalypsoCard_getHceDebitKeyExpiryLocalEpochSeconds,`CalypsoCard.getHceDebitKeyExpiryLocalEpochSeconds`>> exposes the
+decoded header, converted into the number of seconds elapsed since 1 January 1970 at 0:00 local time, so that the
+ticketing layer can display it without knowing the Calypso encoding. It is part of the card image, and is therefore
+carried by an exported processed selection scenario.
+<<op_CalypsoCard_getApplicationSerialNumber,`getApplicationSerialNumber`>> keeps exposing the serial number with its
+two most significant bytes forced to `0`, so that the identity of the application does not change when its debit key
+is renewed.
+
+*Verification.* The comparison belongs to this specification, which owns the Calypso encoding; what it lacks is a
+clock. The application therefore provides a <<type_HceTimeProvider,`HceTimeProvider`>>, registered through
+<<op_CalypsoCardApiFactory_setHceTimeProvider,`CalypsoCardApiFactory.setHceTimeProvider`>>, which returns
+the current time expressed in the same reference as the SN Header, that is **local** time. The debit key is valid while that time precedes the end of validity carried by the SN
+Header. The provider is consulted when the response to the selection is parsed, by the side that holds the card
+extension. It is a local component: it is never part of an exported selection scenario.
+
+*Reporting.* The outcome is always exposed, and never hides the card: an application whose debit key has expired is
+selected like any other, and <<op_CalypsoCard_isHceDebitKeyValid,`CalypsoCard.isHceDebitKeyValid`>> reports the
+verdict, so that the ticketing layer can decide what to do -- refuse the service, invite the holder to renew the
+token, or log the event.
+
+[cols="^.^3,^.^1", options="header"]
+|===
+| Situation | `isHceDebitKeyValid()`
+
+| The application is not HCE, or its SN Header is not significant | `null`
+| The validity has been evaluated | `true` or `false`
+| No time provider has been registered | `null`
+|===
+
+*Protection.* Because the card itself does not enforce the validity window, no secure session may be opened with an
+HCE application whose debit key has expired or could not be verified. The verdict being known as soon as the card
+is selected, this is stated as a *State* pre-condition of the session opening operations rather than as an error
+raised during the exchange: an application that prepares such an opening violates the contract. This applies to
+every secure session, whatever its mode and its write access level. An application that accepts the risk lifts the
+constraint with
+<<op_SecuritySettings_authorizeExpiredHceDebitKey,`SecuritySettings.authorizeExpiredHceDebitKey`>>.
 
 [[sec_class_diagram]]
 === UML class diagram
@@ -1058,7 +1121,7 @@ Failed write commands do not update the in-memory image.
 |===
 | Signature      | `getApplicationSerialNumber() -> ByteArray`
 | Since          | 1.0
-| Description    | Returns the Application Serial Number, an 8-byte value uniquely identifying the card application.
+| Description    | Returns the Application Serial Number, an 8-byte value uniquely identifying the card application. For a *Calypso HCE* application, the two most significant bytes -- the SN Header, which carries the end of validity of the debit key -- are forced to `0`, so that the identity of the application does not change when its debit key is renewed; the header is exposed by <<op_CalypsoCard_getHceDebitKeyExpiryLocalEpochSeconds,`getHceDebitKeyExpiryLocalEpochSeconds`>>.
 | Returns        | A non-empty `ByteArray`.
 | Pre-conditions | None.
 | Errors         | None.
@@ -1252,6 +1315,19 @@ Failed write commands do not update the in-memory image.
 | Since          | 1.1
 | Description    | All known EFs of the current DF. During a secure session, this set reflects every in-session modification (which is rolled back on session failure).
 | Returns        | A `Set<ElementaryFile>`; empty if no EF is known.
+| Pre-conditions | None.
+| Errors         | None.
+|===
+
+[[op_CalypsoCard_getHceDebitKeyExpiryLocalEpochSeconds]]
+===== Get HCE Debit Key Expiry Local Epoch Seconds
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `getHceDebitKeyExpiryLocalEpochSeconds() -> Long?`
+| Since          | 3.0
+| Description    | Returns the end of validity of the debit key declared by the SN Header of this *Calypso HCE* application, as the number of seconds elapsed since 1 January 1970 at 0:00 local time. The SN Header encodes it as a number of half-days elapsed since 1 January 2010 at 0:00 local time; the conversion is performed by this API. See <<sec_hce_validity,HCE debit key validity>>.
+| Returns        | A strictly positive `Long`, or `null` when the application is not HCE or when its SN Header is not significant.
 | Pre-conditions | None.
 | Errors         | None.
 |===
@@ -1605,6 +1681,19 @@ Failed write commands do not update the in-memory image.
 | Errors         | None.
 |===
 
+[[op_CalypsoCard_isHceDebitKeyValid]]
+===== Is HCE Debit Key Valid
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `isHceDebitKeyValid() -> Boolean?`
+| Since          | 3.0
+| Description    | Indicates whether the debit key of this *Calypso HCE* application is still valid, by comparison with the time returned by the registered <<type_HceTimeProvider,`HceTimeProvider`>>, or `null` when no evaluation took place. See <<sec_hce_validity,HCE debit key validity>>.
+| Returns        | A `Boolean` value, or `null` when the application is not HCE, when its SN Header is not significant, or when no time provider was registered.
+| Pre-conditions | None.
+| Errors         | None.
+|===
+
 [[op_CalypsoCard_isPinBlocked]]
 ===== Is PIN Blocked
 
@@ -1851,6 +1940,24 @@ transaction managers. The supplied factory provides the cryptographic module tha
 | Returns        | A <<type_SymmetricCryptoSecuritySettings,`SymmetricCryptoSecuritySettings`>>.
 | Pre-conditions | *Argument* -- every parameter is non-`null`. +
   *Argument* -- the factory is valid.
+| Errors         | None.
+|===
+
+[[op_CalypsoCardApiFactory_setHceTimeProvider]]
+===== Set HCE Time Provider
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `setHceTimeProvider(provider: HceTimeProvider) -> Self`
+| Since          | 3.0
+| Description
+| Registers the service that provides the current local time, used to evaluate the validity of the debit key of a
+  *Calypso HCE* application. The service is consulted when the response to a selection is parsed, and remains local
+  to the environment that holds this card extension: it is never carried by an exported selection scenario. See
+  <<sec_hce_validity,HCE debit key validity>>.
+| Parameters     | `provider` (<<type_HceTimeProvider,`HceTimeProvider`>>) -- the service provided by the application.
+| Returns        | The current instance (`Self`).
+| Pre-conditions | *Argument* -- every parameter is non-`null`.
 | Errors         | None.
 |===
 
@@ -2195,7 +2302,8 @@ sending sensitive commands).
 | Schedules an *Open Secure Session* command in PKI mode. If the next prepared command is a *Read One Record* or
 *Read One Or More Counters*, it will be merged with the session opening for optimisation.
 | Returns        | The current instance (`Self`).
-| Pre-conditions | *State* -- no secure session is already open.
+| Pre-conditions | *State* -- no secure session is already open. +
+  *State* -- the card is not a *Calypso HCE* application whose debit key has expired or could not be verified, unless <<op_SecuritySettings_authorizeExpiredHceDebitKey,`SecuritySettings.authorizeExpiredHceDebitKey`>> has been called.
 | Errors         | None.
 |===
 
@@ -2295,7 +2403,8 @@ in the crypto module.
 | Parameters     | `writeAccessLevel` (<<type_WriteAccessLevel,`WriteAccessLevel`>>) -- the write access level to be used.
 | Returns        | The current instance (`Self`).
 | Pre-conditions | *Argument* -- every parameter is non-`null`. +
-  *State* -- no secure session opening is already prepared, and no secure session is already open.
+  *State* -- no secure session opening is already prepared, and no secure session is already open. +
+  *State* -- the card is not a *Calypso HCE* application whose debit key has expired or could not be verified, unless <<op_SecuritySettings_authorizeExpiredHceDebitKey,`SecuritySettings.authorizeExpiredHceDebitKey`>> has been called.
 | Errors         | None.
 | See also       | <<op_CalypsoCardSelectionExtension_preparePreOpenSecureSession,`CalypsoCardSelectionExtension.preparePreOpenSecureSession`>>
 |===
@@ -2605,6 +2714,24 @@ mode.
   *Argument* -- `maxDurationMs` is strictly positive. +
   *Argument* -- `fciRegex` is a valid regular expression within the portable subset defined by
   <<sec_maxduration,Command exchange duration bounds>>.
+| Errors         | None.
+|===
+
+[[op_SecuritySettings_authorizeExpiredHceDebitKey]]
+===== Authorize Expired HCE Debit Key
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `authorizeExpiredHceDebitKey() -> Self`
+| Since          | 3.0
+| Description
+| Allows a secure session to be opened with a *Calypso HCE* application whose debit key has expired or whose
+  validity could not be evaluated. Without this authorisation, preparing such a session opening violates a
+  pre-condition of the operation. The verdict remains exposed by
+  <<op_CalypsoCard_isHceDebitKeyValid,`CalypsoCard.isHceDebitKeyValid`>> in every case. See
+  <<sec_hce_validity,HCE debit key validity>>.
+| Returns        | The current instance (`Self`).
+| Pre-conditions | None.
 | Errors         | None.
 |===
 
@@ -3829,6 +3956,51 @@ Stored Value application to link (5 to 16 bytes) or an empty `ByteArray` for `ST
 | Namespace  | `calypso.card.transaction.spi`
 | Since      | 2.0
 | Purpose    | Marker enriching the card transaction command set with specific crypto commands (e.g. signature computation/verification). Declares no operation at the API level.
+|===
+
+[[type_HceTimeProvider]]
+==== HCE Time Provider
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Name       | `HceTimeProvider`
+| Kind       | Interface (SPI)
+| Namespace  | `calypso.card.spi`
+| Since      | 3.0
+| Purpose    | Interface that the application MUST implement to provide the current local time to the card extension. It is required to evaluate the validity of the debit key of a *Calypso HCE* application. See <<sec_hce_validity,HCE debit key validity>>.
+|===
+
+[[op_HceTimeProvider_getCurrentLocalEpochSeconds]]
+===== Get Current Local Epoch Seconds
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `getCurrentLocalEpochSeconds() -> Long`
+| Since          | 3.0
+| Description
+a| Returns the current time expressed in the same time reference as the *SN Header* of a Calypso HCE application,
+that is **local** time, as the number of seconds elapsed since 1 January 1970 at 0:00 in that same local reference.
+The implementer provides the time reference it trusts, which MUST be the one in which the tokens of the targeted
+applications were provisioned; the conversions and the comparison with the Calypso encoding are performed by the
+card extension.
+
+*Example.* At 11:30 local time on 1 January 2010, in a zone offset by one hour from UTC, for an application whose
+SN Header is equal to `1`:
+
+* from 1 January 1970 to 1 January 2010 there are 14610 days, so that day starts at
+  `14 610 × 86 400 = 1 262 304 000`;
+* 11:30 adds `41 400` seconds, so this operation returns `1 262 345 400`;
+* the SN Header adds `1 × 43 200 = 43 200` seconds to the start of the same day, so
+  <<op_CalypsoCard_getHceDebitKeyExpiryLocalEpochSeconds,`CalypsoCard.getHceDebitKeyExpiryLocalEpochSeconds`>>
+  returns `1 262 347 200`, that is noon local time;
+* `1 262 345 400` precedes `1 262 347 200`: the debit key is still valid, for thirty more minutes.
+
+The offset from UTC never appears in the computation, both values being read from the same wall clock. Returning
+the instant counted in UTC would give `1 262 341 800`, one hour less, and the key would appear valid for one hour too
+long.
+| Returns        | A strictly positive `Long`.
+| Pre-conditions | None.
+| Errors         | None.
 |===
 
 [[type_PcaCertificate]]

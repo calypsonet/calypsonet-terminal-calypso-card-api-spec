@@ -75,6 +75,12 @@ end legend
 
 package "calypso.card" as calypsoCard {
 
+package "spi" as calypsoCardSpi {
+    interface "<color:blue>HceTimeProvider" as HceTimeProvider <<red>> {
+        +<color:blue>getCurrentLocalEpochSeconds() → Long
+    }
+}
+
 class "CalypsoCardApiProperties" as ApiProperties <<constants>> <<green>> {
     +const VERSION: String = "3.0"
 }
@@ -89,6 +95,7 @@ interface "CalypsoCardApiFactory" as CalypsoCardApiFactory <<blue>> {
     +<color:blue>createSecureExtendedModeTransactionManager(cardReader: <back:yellow>CardReader</back>, card: CalypsoCard, securitySettings: SymmetricCryptoSecuritySettings) → SecureExtendedModeTransactionManager
     +<color:blue>createSecurePkiModeTransactionManager(cardReader: <back:yellow>CardReader</back>, card: CalypsoCard, securitySettings: AsymmetricCryptoSecuritySettings) → SecurePkiModeTransactionManager
 
+    +<color:blue>setHceTimeProvider(provider: HceTimeProvider) → Self
 }
 enum WriteAccessLevel <<green>> {
     +PERSONALIZATION
@@ -134,6 +141,8 @@ package "card" as card {
     interface "«<back:yellow>IsoSmartCard</back>»\nCalypsoCard" as CalypsoCard {
         +getProductType() → <color:blue>CalypsoCardProductType
         +isHce() → Boolean
+        +<color:blue>isHceDebitKeyValid() → Boolean?
+        +<color:blue>getHceDebitKeyExpiryLocalEpochSeconds() → Long?
 
         +isDfInvalidated() → Boolean
 
@@ -355,6 +364,7 @@ package "transaction" as transaction {
         +<color:blue>DEBIT_UNDEBIT
     }
     interface "<color:blue>SecuritySettings" as SecuritySettings {
+		+<color:blue>authorizeExpiredHceDebitKey() → Self
 		+<color:blue>authorizeFileNotFoundError() → Self
 		+<color:blue>authorizeRecordNotFoundError() → Self
 
@@ -435,6 +445,8 @@ package "transaction" as transaction {
 
 ' Associations
 
+CalypsoCardApiFactory .right.> HceTimeProvider #C_USE : use >
+
 TransactionManager .up.> SelectFileControl #C_USE : use >
 TransactionManager .up.> GetDataTag #C_USE : use >
 TransactionManager .up.> PutDataTag #C_USE : use >
@@ -452,7 +464,6 @@ AsymmetricCryptoSecuritySettings .up..> PcaCertificate #C_USE : use >
 AsymmetricCryptoSecuritySettings .up..> CaCertificate #C_USE : use >
 AsymmetricCryptoSecuritySettings .up..> CaCertificateParser #C_USE : use >
 AsymmetricCryptoSecuritySettings .up..> CardCertificateParser #C_USE : use >
-
 
 CalypsoCardSelectionExtension .up.> SelectFileControl #C_USE : use >
 CalypsoCardSelectionExtension .up.> GetDataTag #C_USE : use >
@@ -483,6 +494,7 @@ CaCertificateParser -[hidden]right- CardCertificateParser
 ' == STYLE ==
 
 package calypsoCard #C_GREY1 {}
+package calypsoCard.calypsoCardSpi #C_GREY2 {}
 package calypsoCard.card #C_GREY2 {}
 package calypsoCard.transaction #C_GREY2 {}
 package calypsoCard.transaction.spi #C_GREY3 {}
