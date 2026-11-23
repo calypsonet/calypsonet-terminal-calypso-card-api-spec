@@ -664,6 +664,40 @@ Registering no provider is therefore not a way of skipping the check: it blocks 
 the integrator state rather than infer from silence -- and `authorizeRevokedCard` names that decision for what it
 is, the acceptance of cards whose revocation status is unknown.
 
+[[sec_transaction_counter]]
+=== Transaction counter
+
+A Calypso card maintains a *transaction counter*, which it decrements each time it performs an operation involving
+one of its secret keys. The counter only ever decreases, and once it reaches zero the card refuses the operations
+that consume it -- the card then has to be replaced. A ticketing network therefore has an interest in watching the
+counter of the media it accepts, so as to **anticipate their renewal** rather than discover their exhaustion in
+front of a gate.
+
+The exact width of the counter, its initial value, the operations that consume it and whether it is shared by every
+application of the card are properties of the card product and of its revision, stated by the Calypso card
+specifications. This API exposes the value, not those properties.
+
+*Obtaining the value.* The counter travels in the response to the *Open Secure Session* command, and
+<<op_CalypsoCard_getTransactionCounter,`CalypsoCard.getTransactionCounter`>> exposes it. No dedicated command is
+issued for it: the value comes from an opening the application performs anyway. At least one opening, or one
+pre-opening prepared through
+<<op_CalypsoCardSelectionExtension_preparePreOpenSecureSession,`CalypsoCardSelectionExtension.preparePreOpenSecureSession`>>,
+MUST have taken place for a value to be available; until then the operation returns `null`.
+
+A pre-opening makes the value available **as early as the selection**, before any transaction manager exists. The
+value belongs to the card image, and is therefore carried by an exported processed selection scenario, so that a
+thin client reads a counter obtained by the side that holds the card extension.
+
+An opening consumes one unit of the counter and reports the resulting value. A pre-opening does the same, and the
+session opening that consumes it afterwards consumes nothing more and reports that same value: a pre-opened session
+costs one unit, not two.
+
+*Accuracy.* The value is the one the card reported at the last opening. Operations that consume the counter without
+returning it -- a key or PIN decryption, a Stored Value operation performed outside a secure session -- decrement
+it without this value following. The exposed value is therefore an **upper bound** of the counter actually held by
+the card: the bias is optimistic, and an application that watches it for renewal purposes may believe more
+transactions remain than the card will grant.
+
 [[sec_class_diagram]]
 === UML class diagram
 
@@ -1679,13 +1713,24 @@ Failed write commands do not update the in-memory image.
 
 [cols="^.^1h,.^5", grid=rows, frame=all]
 |===
-| Signature      | `getTransactionCounter() -> Int`
+| Signature      | `getTransactionCounter() -> Int?`
 | Since          | 1.2
-| Description    | Transaction counter from the output of the last successful *Open Secure Session*.
+| Description
+a| Transaction counter reported by the card at the last *Open Secure Session*, whether that opening was performed
+by a session opening operation or by the pre-opening prepared during the card selection. The card returns it
+*after* that opening has consumed it, so the value is the one the card holds once the session is open, and not the
+one it held before. At least one of the two openings MUST have taken place for a value to be available. No
+dedicated command is issued to obtain it.
 
-*Note:* commands such as *Change Key*, *Change/Verify PIN*, *SV Debit/Undebit/Reload* decrement the card counter but do not update this returned value.
-| Returns        | An `Int` value.
-| Pre-conditions | *State* -- a secure session is open.
+A ticketing network typically watches this value to *anticipate the renewal* of a medium whose counter is running
+out, the card refusing the operations that consume the counter once it reaches zero.
+
+*Note:* operations that consume the counter without returning it -- a key or PIN decryption, a Stored Value
+operation performed outside a secure session -- decrement it without this value following. The value exposed here
+is therefore an *upper bound* of the counter actually held by the card. See
+<<sec_transaction_counter,Transaction counter>>.
+| Returns        | An `Int` value, or `null` when no secure session opening or pre-opening has been performed.
+| Pre-conditions | None.
 | Errors         | None.
 | See also       | <<op_CalypsoCardSelectionExtension_preparePreOpenSecureSession,`CalypsoCardSelectionExtension.preparePreOpenSecureSession`>> +
                    <<op_SecureSymmetricCryptoTransactionManager_prepareOpenSecureSession,`SecureSymmetricCryptoTransactionManager.prepareOpenSecureSession`>>

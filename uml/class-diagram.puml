@@ -179,7 +179,7 @@ package "card" as card {
         +<color:blue>getMatchingRecordNumbers(commandId: Int) → List<Int>?
 
         +isDfRatified() → Boolean
-        +getTransactionCounter() → Int
+        +<color:blue>getTransactionCounter() → Int?
 
         +isPkiModeSupported() → Boolean
         +isExtendedModeSupported() → Boolean
