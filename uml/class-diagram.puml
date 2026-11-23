@@ -141,8 +141,8 @@ package "card" as card {
     interface "«<back:yellow>IsoSmartCard</back>»\nCalypsoCard" as CalypsoCard {
         +getProductType() → <color:blue>CalypsoCardProductType
         +isHce() → Boolean
-        +<color:blue>isHceDebitKeyValid() → Boolean?
-        +<color:blue>getHceDebitKeyExpiryLocalEpochSeconds() → Long?
+        +<color:blue>isHceTokenValid() → Boolean?
+        +<color:blue>getHceTokenExpiryLocalEpochSeconds() → Long?
 
         +isDfInvalidated() → Boolean
 
@@ -364,7 +364,8 @@ package "transaction" as transaction {
         +<color:blue>DEBIT_UNDEBIT
     }
     interface "<color:blue>SecuritySettings" as SecuritySettings {
-		+<color:blue>authorizeExpiredHceDebitKey() → Self
+		+<color:blue>authorizeExpiredHceToken() → Self
+
 		+<color:blue>authorizeFileNotFoundError() → Self
 		+<color:blue>authorizeRecordNotFoundError() → Self
     }
