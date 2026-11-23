@@ -367,11 +367,6 @@ package "transaction" as transaction {
 		+<color:blue>authorizeExpiredHceDebitKey() → Self
 		+<color:blue>authorizeFileNotFoundError() → Self
 		+<color:blue>authorizeRecordNotFoundError() → Self
-
-		+<color:blue>assignOpenSecureSessionMaxDurationByCsn(maxDurationMs: Long, csnMin: Long) → Self
-		+<color:blue>assignOpenSecureSessionMaxDurationByFci(maxDurationMs: Long, fciRegex: String) → Self
-		+<color:blue>assignCloseSecureSessionMaxDurationByCsn(maxDurationMs: Long, csnMin: Long) → Self
-		+<color:blue>assignCloseSecureSessionMaxDurationByFci(maxDurationMs: Long, fciRegex: String) → Self
     }
     interface "<color:blue>AsymmetricCryptoSecuritySettings" as AsymmetricCryptoSecuritySettings <<blue>> extends SecuritySettings {
         +addPcaCertificate(pcaCertificate: PcaCertificate) → Self
@@ -400,9 +395,6 @@ package "transaction" as transaction {
 
         +setPinVerificationCipheringKey(kif: Byte, kvc: Byte) → Self
         +setPinModificationCipheringKey(kif: Byte, kvc: Byte) → Self
-
-		+<color:blue>assignSvCommandMaxDurationByCsn(maxDurationMs: Long, csnMin: Long) → Self
-		+<color:blue>assignSvCommandMaxDurationByFci(maxDurationMs: Long, fciRegex: String) → Self
 
         +initCryptoContextForNextTransaction() → Unit
         {method} <size:10><color:#7F8C8D>    ⚠ errors: Crypto, CryptoIO</color></size>
