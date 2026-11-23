@@ -385,6 +385,7 @@ is backward-compatible per that API's evolution policy.
 | Token             | Instance of a Calypso HCE application provisioned by its issuer on a mobile terminal: a credential with a limited scope and a limited lifetime, meant to be renewed. Its end of validity is carried by the SN Header.
 | SN Header         | Two most significant bytes of the application serial number of a Calypso HCE application, carrying the end of validity of its token.
 | Local Time        | Time reference of the ticketing network, in which the SN Header expresses the end of validity of a token and in which the terminal evaluates it. It is the reference in which the tokens were provisioned, and not, in itself, the time zone configured on the terminal.
+| Card revocation   | Withdrawal of a card from service by its issuer, declared outside the card and checked by the terminal against a list commonly called a *card blacklist*.
 |===
 
 === Acronyms
@@ -446,7 +447,7 @@ include::uml/architecture-overview.puml[]
 | Marker interfaces implemented by crypto extensions (`SymmetricCryptoCardTransactionManagerFactory`, `AsymmetricCryptoCardTransactionManagerFactory`, certificate markers, `CardTransactionCryptoExtension`).
 
 | `calypso.card.spi`                       | SPI
-| Services provided by the application to the card extension (`HceTimeProvider`).
+| Services provided by the application to the card extension (`CardRevocationStatusProvider`, `HceTimeProvider`). See <<sec_app_services,Application-supplied services>>.
 |===
 
 [[sec_maxduration]]
@@ -533,6 +534,29 @@ consequences follow:
 * Absent such a configuration, no bound applies and no protection exists. The presence of this section is not, in
   itself, an indication that a given terminal is protected.
 
+[[sec_app_services]]
+=== Application-supplied services
+
+Two verdicts that gate a secure transaction cannot be reached by this API alone: the validity of the token of a
+Calypso HCE application, which requires a clock (<<sec_hce_validity,HCE token validity>>), and the revocation
+status of a card, which requires a list its issuer maintains (<<sec_card_revocation,Card revocation>>). Each is
+therefore obtained from a service that the application implements and registers on
+<<type_CalypsoCardApiFactory,`CalypsoCardApiFactory`>>, in the `calypso.card.spi` namespace.
+
+The two services are deliberately kept separate, one per verdict: an integrator whose fleet holds no HCE
+application has no clock to provide, and the two are implemented by different components -- a clock is a platform
+concern, a revocation list a back-office one. They share the following rules.
+
+* They are consulted when the response to a selection is *parsed*, by the side that holds the card extension: the
+  client when it embeds the extension, the server when the client is a thin one.
+* They are local components, and are *never* part of an exported selection scenario. Their verdict, on the
+  contrary, belongs to the card image and is therefore carried by an exported *processed* scenario, so that a thin
+  client receives a verdict computed where the service lives.
+* They MUST answer without a blocking remote call -- from an in-memory structure or a local cache -- since they run
+  inside the contactless window, while the card is in front of the reader.
+* An unobtained verdict is never silently taken for a favourable one. Each of the two sections states what happens
+  when its service is absent or cannot answer.
+
 [[sec_hce_validity]]
 === HCE token validity
 
@@ -567,8 +591,7 @@ is renewed.
 clock. The application therefore provides a <<type_HceTimeProvider,`HceTimeProvider`>>, registered through
 <<op_CalypsoCardApiFactory_setHceTimeProvider,`CalypsoCardApiFactory.setHceTimeProvider`>>, which returns
 the current time expressed in the same reference as the SN Header, that is **local** time. The token is valid while that time precedes the end of validity carried by the SN
-Header. The provider is consulted when the response to the selection is parsed, by the side that holds the card
-extension. It is a local component: it is never part of an exported selection scenario.
+Header. The provider follows the rules stated in <<sec_app_services,Application-supplied services>>.
 
 *Reporting.* The outcome is always exposed, and never hides the card: an application whose token has expired is
 selected like any other, and <<op_CalypsoCard_isHceTokenValid,`CalypsoCard.isHceTokenValid`>> reports the
@@ -591,6 +614,55 @@ raised during the exchange: an application that prepares such an opening violate
 every secure session, whatever its mode and its write access level. An application that accepts the risk lifts the
 constraint with
 <<op_SecuritySettings_authorizeExpiredHceToken,`SecuritySettings.authorizeExpiredHceToken`>>.
+
+[[sec_card_revocation]]
+=== Card revocation
+
+An issuer may withdraw a card from service -- because it was reported lost or stolen, because it is the subject of
+a dispute, or because the entitlement of its holder has ended. Nothing in the card records that decision: it lives
+in a list the issuer maintains, outside the card and outside this API. The verification therefore belongs to the
+terminal, and this specification splits it in three, as it does for the validity of an HCE token.
+
+*Checking.* The application provides a <<type_CardRevocationStatusProvider,`CardRevocationStatusProvider`>>,
+registered through
+<<op_CalypsoCardApiFactory_setCardRevocationStatusProvider,`CalypsoCardApiFactory.setCardRevocationStatusProvider`>>,
+which answers whether the card bearing a given application serial number has been withdrawn from service. The
+provider follows the rules stated in <<sec_app_services,Application-supplied services>> and always answers: what
+it does when its list cannot be consulted is its own policy, not a third value of this API.
+
+The key of the lookup is the 8-byte application serial number, as
+<<op_CalypsoCard_getApplicationSerialNumber,`getApplicationSerialNumber`>> exposes it. For a *Calypso HCE*
+application, its two most significant bytes are forced to `0`, so the key does not change when the token is
+renewed: revoking an HCE instance survives the renewal of its token. No partial match is defined, a prefix of a
+serial number designating no single card.
+
+*Reporting.* The outcome is always exposed, and never hides the card: a revoked card is selected like any other,
+and <<op_CalypsoCard_isRevoked,`CalypsoCard.isRevoked`>> reports the verdict, so that the ticketing layer can
+decide what to do -- refuse the service, raise an alert, or log the event.
+
+[cols="^.^3,^.^1", options="header"]
+|===
+| Situation | `isRevoked()`
+
+| The status has been evaluated | `true` or `false`
+| No revocation status provider has been registered | `null`
+|===
+
+Unlike the validity of an HCE token, a revocation status has no *not applicable* case: every card may be revoked,
+so `null` has a single meaning, that no provider was there to answer. It is a matter of configuration, stable for
+the life of the terminal, and never the trace of a transient failure.
+
+*Protection.* No secure session may be opened with a card that is revoked, or whose revocation status could not be
+verified. As for the HCE token, the verdict being known as soon as the card is selected, this is stated as a *State*
+pre-condition of the session opening operations rather than as an error raised during the exchange: an application
+that prepares such an opening violates the contract. This applies to every secure session, whatever its mode and
+its write access level. An application that accepts the risk lifts the constraint with
+<<op_SecuritySettings_authorizeRevokedCard,`SecuritySettings.authorizeRevokedCard`>>.
+
+Registering no provider is therefore not a way of skipping the check: it blocks every secure session until
+`authorizeRevokedCard` is called. The absence of a revocation list is a deliberate decision, which this API makes
+the integrator state rather than infer from silence -- and `authorizeRevokedCard` names that decision for what it
+is, the acceptance of cards whose revocation status is unknown.
 
 [[sec_class_diagram]]
 === UML class diagram
@@ -1753,6 +1825,19 @@ Failed write commands do not update the in-memory image.
 | Errors         | None.
 |===
 
+[[op_CalypsoCard_isRevoked]]
+===== Is Revoked
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `isRevoked() -> Boolean?`
+| Since          | 3.0
+| Description    | Indicates whether this card has been withdrawn from service by its issuer, as reported by the registered <<type_CardRevocationStatusProvider,`CardRevocationStatusProvider`>>, or `null` when no provider was registered and the status could therefore not be verified. Not to be confused with <<op_CalypsoCard_isDfInvalidated,`isDfInvalidated`>>, which reports an invalidation carried by the card itself. See <<sec_card_revocation,Card revocation>>.
+| Returns        | A `Boolean` value, or `null` when no revocation status provider was registered.
+| Pre-conditions | None.
+| Errors         | None.
+|===
+
 [[op_CalypsoCard_isSvFeatureAvailable]]
 ===== Is SV Feature Available
 
@@ -1941,6 +2026,23 @@ transaction managers. The supplied factory provides the cryptographic module tha
 | Returns        | A <<type_SymmetricCryptoSecuritySettings,`SymmetricCryptoSecuritySettings`>>.
 | Pre-conditions | *Argument* -- every parameter is non-`null`. +
   *Argument* -- the factory is valid.
+| Errors         | None.
+|===
+
+[[op_CalypsoCardApiFactory_setCardRevocationStatusProvider]]
+===== Set Card Revocation Status Provider
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `setCardRevocationStatusProvider(provider: CardRevocationStatusProvider) -> Self`
+| Since          | 3.0
+| Description
+| Registers the service that provides the revocation status of a card. The service is consulted when the response
+  to a selection is parsed, and remains local to the environment that holds this card extension: it is never
+  carried by an exported selection scenario. See <<sec_card_revocation,Card revocation>>.
+| Parameters     | `provider` (<<type_CardRevocationStatusProvider,`CardRevocationStatusProvider`>>) -- the service provided by the application.
+| Returns        | The current instance (`Self`).
+| Pre-conditions | *Argument* -- every parameter is non-`null`.
 | Errors         | None.
 |===
 
@@ -2304,7 +2406,8 @@ sending sensitive commands).
 *Read One Or More Counters*, it will be merged with the session opening for optimisation.
 | Returns        | The current instance (`Self`).
 | Pre-conditions | *State* -- no secure session is already open. +
-  *State* -- the card is not a *Calypso HCE* application whose token has expired or could not be verified, unless <<op_SecuritySettings_authorizeExpiredHceToken,`SecuritySettings.authorizeExpiredHceToken`>> has been called.
+  *State* -- the card is not a *Calypso HCE* application whose token has expired or could not be verified, unless <<op_SecuritySettings_authorizeExpiredHceToken,`SecuritySettings.authorizeExpiredHceToken`>> has been called. +
+  *State* -- the card is not revoked and its revocation status could be verified, unless <<op_SecuritySettings_authorizeRevokedCard,`SecuritySettings.authorizeRevokedCard`>> has been called.
 | Errors         | None.
 |===
 
@@ -2405,7 +2508,8 @@ in the crypto module.
 | Returns        | The current instance (`Self`).
 | Pre-conditions | *Argument* -- every parameter is non-`null`. +
   *State* -- no secure session opening is already prepared, and no secure session is already open. +
-  *State* -- the card is not a *Calypso HCE* application whose token has expired or could not be verified, unless <<op_SecuritySettings_authorizeExpiredHceToken,`SecuritySettings.authorizeExpiredHceToken`>> has been called.
+  *State* -- the card is not a *Calypso HCE* application whose token has expired or could not be verified, unless <<op_SecuritySettings_authorizeExpiredHceToken,`SecuritySettings.authorizeExpiredHceToken`>> has been called. +
+  *State* -- the card is not revoked and its revocation status could be verified, unless <<op_SecuritySettings_authorizeRevokedCard,`SecuritySettings.authorizeRevokedCard`>> has been called.
 | Errors         | None.
 | See also       | <<op_CalypsoCardSelectionExtension_preparePreOpenSecureSession,`CalypsoCardSelectionExtension.preparePreOpenSecureSession`>>
 |===
@@ -2613,7 +2717,7 @@ mode.
 | Kind       | Interface
 | Namespace  | `calypso.card.transaction`
 | Since      | 3.0
-| Purpose    | Settings shared by every Calypso card secure transaction, whatever the cryptographic nature of the secure session: tolerance of a missing file or record inside a secure session and acceptance of an expired HCE token. Implemented by <<type_SymmetricCryptoSecuritySettings,`SymmetricCryptoSecuritySettings`>> and <<type_AsymmetricCryptoSecuritySettings,`AsymmetricCryptoSecuritySettings`>>.
+| Purpose    | Settings shared by every Calypso card secure transaction, whatever the cryptographic nature of the secure session: tolerance of a missing file or record inside a secure session, and acceptance of an expired HCE token or of a revoked card. Implemented by <<type_SymmetricCryptoSecuritySettings,`SymmetricCryptoSecuritySettings`>> and <<type_AsymmetricCryptoSecuritySettings,`AsymmetricCryptoSecuritySettings`>>.
 |===
 
 [[op_SecuritySettings_authorizeExpiredHceToken]]
@@ -2669,6 +2773,25 @@ mode.
 
   This setting is useful for heterogeneous card fleets, where the presence of a file or of a record cannot be known
   in advance. See <<op_SecuritySettings_authorizeFileNotFoundError,`authorizeFileNotFoundError()`>>.
+| Returns        | The current instance (`Self`).
+| Pre-conditions | None.
+| Errors         | None.
+|===
+
+[[op_SecuritySettings_authorizeRevokedCard]]
+===== Authorize Revoked Card
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `authorizeRevokedCard() -> Self`
+| Since          | 3.0
+| Description
+| Allows a secure session to be opened with a card that is revoked, or whose revocation status could not be
+  verified because no <<type_CardRevocationStatusProvider,`CardRevocationStatusProvider`>> was registered. Without
+  this authorisation,
+  preparing such a session opening violates a pre-condition of the operation. The verdict remains exposed by
+  <<op_CalypsoCard_isRevoked,`CalypsoCard.isRevoked`>> in every case. See
+  <<sec_card_revocation,Card revocation>>.
 | Returns        | The current instance (`Self`).
 | Pre-conditions | None.
 | Errors         | None.
@@ -3794,6 +3917,41 @@ Stored Value application to link (5 to 16 bytes) or an empty `ByteArray` for `ST
 | Namespace  | `calypso.card.transaction.spi`
 | Since      | 2.1
 | Purpose    | Marker for a card certificate parser exposed by a <<ref_cna_tcca,CNA-TCCA-API>> extension. Registered through <<op_AsymmetricCryptoSecuritySettings_addCardCertificateParser,`AsymmetricCryptoSecuritySettings.addCardCertificateParser`>>.
+|===
+
+[[type_CardRevocationStatusProvider]]
+==== Card Revocation Status Provider
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Name       | `CardRevocationStatusProvider`
+| Kind       | Interface (SPI)
+| Namespace  | `calypso.card.spi`
+| Since      | 3.0
+| Purpose    | Interface that the application MUST implement to provide the revocation status of a Calypso card to the card extension. See <<sec_card_revocation,Card revocation>>.
+|===
+
+[[op_CardRevocationStatusProvider_isCardRevoked]]
+===== Is Card Revoked
+
+[cols="^.^1h,.^5", grid=rows, frame=all]
+|===
+| Signature      | `isCardRevoked(applicationSerialNumber: ByteArray) -> Boolean`
+| Since          | 3.0
+| Description
+| Indicates whether the card bearing the supplied application serial number has been withdrawn from service by its
+  issuer. The answer MUST be produced without a blocking remote call, this operation being executed while the card
+  is in front of the reader (see <<sec_app_services,Application-supplied services>>).
+
+  The operation always answers: no third value reports an unavailable list or an incomplete cache. Such a fallback
+  belongs to the provider, which is the only component holding the operational context -- the age of its cache, the
+  policy of the operator, the nature of the site. A provider that cannot consult its list SHOULD answer
+  conservatively, keeping in mind that the answer it gives is the one the ticketing layer will read through
+  <<op_CalypsoCard_isRevoked,`CalypsoCard.isRevoked`>>.
+| Parameters     | `applicationSerialNumber` -- the complete 8-byte application serial number of the card, as exposed by <<op_CalypsoCard_getApplicationSerialNumber,`CalypsoCard.getApplicationSerialNumber`>>.
+| Returns        | `true` if the card is revoked, `false` otherwise.
+| Pre-conditions | *Argument* -- every parameter is non-`null`.
+| Errors         | None.
 |===
 
 [[type_CardTransactionCryptoExtension]]

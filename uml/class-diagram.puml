@@ -76,6 +76,9 @@ end legend
 package "calypso.card" as calypsoCard {
 
 package "spi" as calypsoCardSpi {
+    interface "<color:blue>CardRevocationStatusProvider" as CardRevocationStatusProvider <<red>> {
+        +<color:blue>isCardRevoked(applicationSerialNumber: ByteArray) → Boolean
+    }
     interface "<color:blue>HceTimeProvider" as HceTimeProvider <<red>> {
         +<color:blue>getCurrentLocalEpochSeconds() → Long
     }
@@ -95,6 +98,7 @@ interface "CalypsoCardApiFactory" as CalypsoCardApiFactory <<blue>> {
     +<color:blue>createSecureExtendedModeTransactionManager(cardReader: <back:yellow>CardReader</back>, card: CalypsoCard, securitySettings: SymmetricCryptoSecuritySettings) → SecureExtendedModeTransactionManager
     +<color:blue>createSecurePkiModeTransactionManager(cardReader: <back:yellow>CardReader</back>, card: CalypsoCard, securitySettings: AsymmetricCryptoSecuritySettings) → SecurePkiModeTransactionManager
 
+    +<color:blue>setCardRevocationStatusProvider(provider: CardRevocationStatusProvider) → Self
     +<color:blue>setHceTimeProvider(provider: HceTimeProvider) → Self
 }
 enum WriteAccessLevel <<green>> {
@@ -140,11 +144,13 @@ package "card" as card {
     }
     interface "«<back:yellow>IsoSmartCard</back>»\nCalypsoCard" as CalypsoCard {
         +getProductType() → <color:blue>CalypsoCardProductType
+
         +isHce() → Boolean
         +<color:blue>isHceTokenValid() → Boolean?
         +<color:blue>getHceTokenExpiryLocalEpochSeconds() → Long?
 
         +isDfInvalidated() → Boolean
+        +<color:blue>isRevoked() → Boolean?
 
         +getDfName() → ByteArray
         +getApplicationSerialNumber() → ByteArray
@@ -364,6 +370,7 @@ package "transaction" as transaction {
         +<color:blue>DEBIT_UNDEBIT
     }
     interface "<color:blue>SecuritySettings" as SecuritySettings {
+		+<color:blue>authorizeRevokedCard() → Self
 		+<color:blue>authorizeExpiredHceToken() → Self
 
 		+<color:blue>authorizeFileNotFoundError() → Self
@@ -438,6 +445,7 @@ package "transaction" as transaction {
 
 ' Associations
 
+CalypsoCardApiFactory .right.> CardRevocationStatusProvider #C_USE : use >
 CalypsoCardApiFactory .right.> HceTimeProvider #C_USE : use >
 
 TransactionManager .up.> SelectFileControl #C_USE : use >
